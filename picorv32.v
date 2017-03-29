@@ -239,6 +239,11 @@ module picorv32 #(
 	reg        pcpi_int_wait;
 	reg        pcpi_int_ready;
 
+	wire        pcpi_edge_wr;
+	wire [31:0] pcpi_edge_rd;
+	wire        pcpi_edge_wait;
+	wire        pcpi_edge_ready;
+
 	generate if (ENABLE_FAST_MUL) begin
 		picorv32_pcpi_fast_mul pcpi_mul (
 			.clk       (clk            ),
@@ -292,11 +297,24 @@ module picorv32 #(
 		assign pcpi_div_ready = 0;
 	end endgenerate
 
+  picorv32_pcpi_edge pcpi_edge (
+		.clk       (clk            ),
+		.resetn    (resetn         ),
+		.pcpi_valid(pcpi_valid     ),
+		.pcpi_insn (pcpi_insn      ),
+		.pcpi_rs1  (pcpi_rs1       ),
+		.pcpi_rs2  (pcpi_rs2       ),
+		.pcpi_wr   (pcpi_edge_wr    ),
+		.pcpi_rd   (pcpi_edge_rd    ),
+		.pcpi_wait (pcpi_edge_wait  ),
+		.pcpi_ready(pcpi_edge_ready )
+	);
+
 	always @* begin
 		pcpi_int_wr = 0;
 		pcpi_int_rd = 32'bx;
-		pcpi_int_wait  = |{ENABLE_PCPI && pcpi_wait,  (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_wait,  ENABLE_DIV && pcpi_div_wait};
-		pcpi_int_ready = |{ENABLE_PCPI && pcpi_ready, (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_ready, ENABLE_DIV && pcpi_div_ready};
+		pcpi_int_wait  = |{ENABLE_PCPI && pcpi_wait,  (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_wait,  ENABLE_DIV && pcpi_div_wait, pcpi_edge_wait};
+		pcpi_int_ready = |{ENABLE_PCPI && pcpi_ready, (ENABLE_MUL || ENABLE_FAST_MUL) && pcpi_mul_ready, ENABLE_DIV && pcpi_div_ready, pcpi_edge_ready};
 
 		(* parallel_case *)
 		case (1'b1)
@@ -312,6 +330,10 @@ module picorv32 #(
 				pcpi_int_wr = pcpi_div_wr;
 				pcpi_int_rd = pcpi_div_rd;
 			end
+      pcpi_edge_ready: begin
+        pcpi_int_wr = pcpi_edge_wr;
+        pcpi_int_rd = pcpi_edge_rd;
+      end
 		endcase
 	end
 
@@ -2292,6 +2314,56 @@ module picorv32_pcpi_div (
 		end
 	end
 endmodule
+
+/***************************************************************
+ * picorv32_pcpi_edge
+ ***************************************************************/
+
+module picorv32_pcpi_edge (
+	input clk, resetn,
+	input             pcpi_valid,
+	input      [31:0] pcpi_insn,
+	input      [31:0] pcpi_rs1,
+	input      [31:0] pcpi_rs2,
+	output reg        pcpi_wr,
+	output reg [31:0] pcpi_rd,
+	output reg        pcpi_wait,
+	output reg        pcpi_ready
+);
+
+  reg instr_posedge;
+
+	reg pcpi_wait_q;
+	wire start = pcpi_wait && !pcpi_wait_q;
+
+	always @(posedge clk) begin
+		instr_posedge <= 0;
+
+		if (resetn && pcpi_valid && !pcpi_ready && pcpi_insn[6:0] == 7'b0011011) begin
+      instr_posedge <= 1;
+		end
+
+		pcpi_wait <= instr_posedge;
+		pcpi_wait_q <= pcpi_wait;
+	end
+
+	reg running;
+
+  reg [31:0] number_of_edges;
+  integer i;
+  always @(*) begin
+    for (i=0; i<31; i=i+1) begin
+      if (!pcpi_rs1[31-i]&&pcpi_rs1[30-i])
+        number_of_edges = number_of_edges + 1;
+    end
+  end
+
+  assign pcpi_ready = 1;
+  assign pcpi_wr = start;
+  assign pcpi_rd = number_of_edges;
+
+endmodule
+
 
 
 /***************************************************************
