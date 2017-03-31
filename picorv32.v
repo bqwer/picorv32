@@ -2352,6 +2352,7 @@ module picorv32_pcpi_edge (
   reg [31:0] number_of_edges;
   integer i;
   always @(*) begin
+    number_of_edges = 0;
     for (i=0; i<31; i=i+1) begin
       if (!pcpi_rs1[31-i]&&pcpi_rs1[30-i])
         number_of_edges = number_of_edges + 1;
